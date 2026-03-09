@@ -17,14 +17,19 @@ const Sidebar: React.FC<SidebarProps> = ({ onMapUpload, onMapClear, hasMap }) =>
   const tokenInputRef = useRef<HTMLInputElement>(null);
   const tableInputRef = useRef<HTMLInputElement>(null);
   const tokenBackInputRef = useRef<HTMLInputElement>(null);
+  const subTokenInputRef = useRef<HTMLInputElement>(null);
+  const subTokenBackInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [activeTokenIdForBackImage, setActiveTokenIdForBackImage] = React.useState<string | null>(null);
+  const [activeSubTokenIdForBackImage, setActiveSubTokenIdForBackImage] = React.useState<string | null>(null);
+  const [bindingModeParentId, setBindingModeParentId] = useState<string | null>(null);
   
   // Use store instead of local state
   const items = useTokenStore((state) => state.items);
   const graveyards = useTokenStore((state) => state.graveyards);
   const drawBags = useTokenStore((state) => state.drawBags);
   const tokenPool = useTokenStore((state) => state.tokenPool);
+  const subTokenPool = useTokenStore((state) => state.subTokenPool);
   const tablePool = useTokenStore((state) => state.tablePool);
   const markerPool = useTokenStore((state) => state.markerPool);
   const globalTokenScale = useTokenStore((state) => state.globalTokenScale);
@@ -47,6 +52,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onMapUpload, onMapClear, hasMap }) =>
       graveyards,
       drawBags,
       tokenPool,
+      subTokenPool,
       tablePool,
       markerPool,
       globalTokenScale,
@@ -108,6 +114,13 @@ const Sidebar: React.FC<SidebarProps> = ({ onMapUpload, onMapClear, hasMap }) =>
   const clearTokenPool = useTokenStore((state) => state.clearTokenPool);
   const setTokenPoolItemBackImage = useTokenStore((state) => state.setTokenPoolItemBackImage);
   const removeTokenFromPool = useTokenStore((state) => state.removeTokenFromPool);
+  
+  const addSubTokensToPool = useTokenStore((state) => state.addSubTokensToPool);
+  const clearSubTokenPool = useTokenStore((state) => state.clearSubTokenPool);
+  const setSubTokenPoolItemBackImage = useTokenStore((state) => state.setSubTokenPoolItemBackImage);
+  const removeSubTokenFromPool = useTokenStore((state) => state.removeSubTokenFromPool);
+  const bindSubTokensToMain = useTokenStore((state) => state.bindSubTokensToMain);
+
   const addMarkersToPool = useTokenStore((state) => state.addMarkersToPool);
   const updateMarkerSizeInPool = useTokenStore((state) => state.updateMarkerSizeInPool);
   const clearMarkerPool = useTokenStore((state) => state.clearMarkerPool);
@@ -122,6 +135,10 @@ const Sidebar: React.FC<SidebarProps> = ({ onMapUpload, onMapClear, hasMap }) =>
 
   const handleTokenUploadClick = () => {
     tokenInputRef.current?.click();
+  };
+
+  const handleSubTokenUploadClick = () => {
+    subTokenInputRef.current?.click();
   };
 
   const markerInputRef = useRef<HTMLInputElement>(null);
@@ -171,6 +188,11 @@ const Sidebar: React.FC<SidebarProps> = ({ onMapUpload, onMapClear, hasMap }) =>
     handleFileProcessing(event.target.files, addTokensToPool);
     if (event.target) event.target.value = '';
   };
+
+  const handleSubTokenFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    handleFileProcessing(event.target.files, addSubTokensToPool);
+    if (event.target) event.target.value = '';
+  };
   
   const handleMarkerFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     handleFileProcessing(event.target.files, addMarkersToPool);
@@ -196,14 +218,49 @@ const Sidebar: React.FC<SidebarProps> = ({ onMapUpload, onMapClear, hasMap }) =>
       if (event.target) event.target.value = '';
   }
 
+  const handleSubTokenBackFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file && activeSubTokenIdForBackImage) {
+        try {
+          const reader = new FileReader();
+          const base64 = await new Promise<string>((resolve, reject) => {
+              reader.onload = (e) => resolve(e.target?.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(file);
+          });
+          setSubTokenPoolItemBackImage(activeSubTokenIdForBackImage, base64);
+        } catch (error) {
+            console.error("Error reading sub-token back image:", error);
+        }
+    }
+    setActiveSubTokenIdForBackImage(null);
+    if (event.target) event.target.value = '';
+  }
+
   const handleTableFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     handleFileProcessing(event.target.files, addTablesToPool);
     if (event.target) event.target.value = '';
   };
 
-  const handleDragStart = (e: React.DragEvent<HTMLImageElement>, id: string, src: string, type: 'token' | 'table', backSrc?: string) => {
-    e.dataTransfer.setData('wargame-item', JSON.stringify({ id, type, src, backSrc, fromPool: true }));
+  const handleDragStart = (e: React.DragEvent<HTMLImageElement>, id: string, src: string, type: 'token' | 'table' | 'sub-token', backSrc?: string, splitBinding?: string | null) => {
+    e.dataTransfer.setData('wargame-item', JSON.stringify({ id, type, src, backSrc, splitBinding, fromPool: true }));
     e.dataTransfer.effectAllowed = 'copy';
+  };
+
+  const toggleBindingMode = (parentId: string) => {
+    if (bindingModeParentId === parentId) {
+        setBindingModeParentId(null);
+    } else {
+        setBindingModeParentId(parentId);
+    }
+  };
+
+  const handleSubTokenClick = (subId: string) => {
+    if (!bindingModeParentId) return;
+
+    bindSubTokensToMain(bindingModeParentId, subId);
+    setBindingModeParentId(null);
+    alert('绑定成功！拆分时将生成两个此子算子。');
   };
 
   return (
@@ -373,7 +430,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onMapUpload, onMapClear, hasMap }) =>
                         alt={`Token ${token.id}`}
                         className="w-full h-full object-contain p-0.5"
                         draggable={true}
-                        onDragStart={(e) => handleDragStart(e, token.id, token.imageUrl, 'token', token.backImageUrl)}
+                        onDragStart={(e) => handleDragStart(e, token.id, token.imageUrl, 'token', token.backImageUrl, token.splitBinding)}
                     />
                     <button 
                         onClick={() => {
@@ -384,6 +441,14 @@ const Sidebar: React.FC<SidebarProps> = ({ onMapUpload, onMapClear, hasMap }) =>
                         title={token.backImageUrl ? "已绑定背面" : "绑定背面"}
                     >
                         {token.backImageUrl ? 'R' : '+'}
+                    </button>
+
+                    <button
+                        onClick={() => toggleBindingMode(token.id)}
+                        className={`absolute bottom-0 left-0 text-[8px] w-4 h-4 flex items-center justify-center transition-colors rounded-tr ${bindingModeParentId === token.id ? 'bg-yellow-500 text-black animate-pulse' : (token.splitBinding ? 'bg-purple-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600')}`}
+                        title={token.splitBinding ? "已绑定子算子" : "绑定子算子"}
+                    >
+                        🔗
                     </button>
 
                     <button
@@ -398,6 +463,102 @@ const Sidebar: React.FC<SidebarProps> = ({ onMapUpload, onMapClear, hasMap }) =>
                 {tokenPool.length === 0 && (
                     <div className="col-span-4 text-center py-8 text-gray-500 text-[10px]">
                     暂无算子
+                    </div>
+                )}
+                </div>
+            </div>
+        </div>
+
+        {/* Sub-Token Pool */}
+        <div className="border-t border-gray-700 pt-4 space-y-4">
+            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">子算子库</h2>
+            
+            <input 
+            type="file" 
+            ref={subTokenInputRef}
+            className="hidden" 
+            multiple
+            accept="image/*"
+            onChange={handleSubTokenFileChange}
+            />
+            <input 
+                type="file"
+                ref={subTokenBackInputRef}
+                className="hidden"
+                accept="image/*"
+                onChange={handleSubTokenBackFileChange}
+            />
+            
+            <div className="flex gap-2">
+                <button 
+                onClick={handleSubTokenUploadClick}
+                className="flex-1 bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2 px-4 rounded transition-colors duration-200 flex items-center justify-center gap-2 text-xs"
+                >
+                <span>🖇️</span> 上传子算子
+                </button>
+                {subTokenPool.length > 0 && (
+                    <button 
+                    onClick={() => {
+                        if (window.confirm('确定要清空子算子库吗？')) {
+                            clearSubTokenPool();
+                        }
+                    }}
+                    className="bg-red-600 hover:bg-red-700 text-white px-2 rounded transition-colors duration-200"
+                    title="清空子算子库"
+                    >
+                    <span>🗑️</span>
+                    </button>
+                )}
+            </div>
+
+            {bindingModeParentId && (
+                <div className="bg-yellow-900/30 border border-yellow-700 p-2 rounded text-[10px] text-yellow-200 animate-pulse">
+                    正在为算子选择子算子模版...
+                </div>
+            )}
+
+            <div className="bg-gray-800 rounded-lg p-2 border border-gray-700 max-h-40 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600">
+                <div className="grid grid-cols-4 gap-2">
+                {subTokenPool.map((token) => (
+                    <div 
+                    key={token.id} 
+                    className={`aspect-square bg-gray-900 rounded border overflow-hidden cursor-grab transition-all group relative ${bindingModeParentId ? 'hover:border-yellow-400 border-dashed' : 'border-gray-600 hover:border-teal-500'}`}
+                    onClick={() => handleSubTokenClick(token.id)}
+                    >
+                    <img 
+                        src={token.imageUrl}
+                        alt={`Sub-Token ${token.id}`}
+                        className="w-full h-full object-contain p-0.5"
+                        draggable={true}
+                        onDragStart={(e) => handleDragStart(e, token.id, token.imageUrl, 'sub-token', token.backImageUrl)}
+                    />
+                    <button 
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveSubTokenIdForBackImage(token.id);
+                            subTokenBackInputRef.current?.click();
+                        }}
+                        className={`absolute bottom-0 right-0 text-[8px] w-4 h-4 flex items-center justify-center transition-colors rounded-tl ${token.backImageUrl ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
+                        title={token.backImageUrl ? "已绑定背面" : "绑定背面"}
+                    >
+                        {token.backImageUrl ? 'R' : '+'}
+                    </button>
+
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            removeSubTokenFromPool(token.id);
+                        }}
+                        className="absolute top-0 right-0 bg-red-600 text-white text-[8px] w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-bl"
+                        title="删除"
+                    >
+                        ×
+                    </button>
+                    </div>
+                ))}
+                {subTokenPool.length === 0 && (
+                    <div className="col-span-4 text-center py-4 text-gray-500 text-[10px]">
+                    暂无子算子
                     </div>
                 )}
                 </div>

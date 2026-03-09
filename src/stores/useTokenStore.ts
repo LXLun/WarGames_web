@@ -18,6 +18,15 @@ export interface MapItem {
   startX?: number;
   startY?: number;
   isMarker?: boolean;
+  // Split/Merge tracking
+  basePoolId?: string; // Original template ID
+  parentInstanceId?: string; // If this is a sub-token, who was the parent?
+  isSubToken?: boolean;
+  linkedSubTokenId?: string; // The ID of the sub-token template to use (will create 2)
+  splitBinding?: string | null; // ID of the SINGLE sub-token template to use (creates 2)
+  parentBasePoolId?: string; // Cache the original parent template ID for easier merging
+  parentImageUrl?: string; // Backup of parent image
+  parentBackImageUrl?: string; // Backup of parent back image
 }
 
 export interface Zone {
@@ -31,6 +40,8 @@ export interface PoolItem {
   imageUrl: string;
   backImageUrl?: string; 
   defaultScale?: number;
+  // Sub-token binding (only for main tokens)
+  splitBinding?: string | null; // ID of the SINGLE sub-token template to use (creates 2)
 }
 
 export interface DiceRoll {
@@ -52,6 +63,7 @@ interface ItemState {
   graveyards: Zone[];
   drawBags: Zone[];
   tokenPool: PoolItem[];
+  subTokenPool: PoolItem[]; // New pool for child tokens
   tablePool: PoolItem[];
   markerPool: PoolItem[];
   globalTokenScale: number;
@@ -99,6 +111,21 @@ interface ItemState {
   setTokenPoolItemBackImage: (id: string, backImageUrl: string) => void; 
   removeTokenFromPool: (id: string) => void;
   clearTokenPool: () => void;
+
+  // Sub-pool methods
+  addSubTokensToPool: (imageUrls: string[]) => void;
+  setSubTokenPoolItemBackImage: (id: string, backImageUrl: string) => void;
+  removeSubTokenFromPool: (id: string) => void;
+  clearSubTokenPool: () => void;
+
+  // Binding
+  bindSubTokensToMain: (mainPoolId: string, subId: string) => void;
+  bindSubTokenToMapItem: (itemId: string, subId: string) => void;
+
+  // Map Actions
+  splitMapItem: (id: string) => void;
+  mergeMapItems: (idA: string, idB: string) => void;
+  setItemBackImage: (id: string, backImageUrl: string) => void;
 
   addMarkersToPool: (imageUrls: string[]) => void;
   updateMarkerSizeInPool: (id: string, delta: number) => void;
@@ -162,6 +189,14 @@ const saveMarkerPoolToLocal = async (pool: PoolItem[]) => {
   }
 };
 
+const saveSubTokenPoolToLocal = async (pool: PoolItem[]) => {
+  try {
+    await localforage.setItem('wargame_sub_token_pool', pool);
+  } catch (error) {
+    console.error('Failed to save sub-token pool:', error);
+  }
+};
+
 const saveGlobalScaleToLocal = async (scale: number) => {
   try {
     await localforage.setItem('wargame_global_scale', scale);
@@ -196,6 +231,7 @@ export const useTokenStore = create<ItemState>((set, get) => ({
       { id: 'b1', name: '抽签袋 1', tokens: [] }
   ],
   tokenPool: [],
+  subTokenPool: [],
   tablePool: [],
   markerPool: [],
   globalTokenScale: 1,
@@ -216,6 +252,8 @@ export const useTokenStore = create<ItemState>((set, get) => ({
       startX: itemData.x,
       startY: itemData.y,
       ...itemData,
+      // Propagate splitBinding from base template if it exists
+      splitBinding: itemData.splitBinding || (itemData.basePoolId ? get().tokenPool.find(p => p.id === itemData.basePoolId)?.splitBinding : null)
     };
 
     const newItems = [...items, newItem];
@@ -635,6 +673,213 @@ export const useTokenStore = create<ItemState>((set, get) => ({
     saveTokenPoolToLocal([]);
   },
 
+  addSubTokensToPool: (imageUrls) => {
+    const { subTokenPool } = get();
+    const newItems = imageUrls.map(url => ({
+        id: `pool-sub-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        imageUrl: url
+    }));
+    const newPool = [...subTokenPool, ...newItems];
+    set({ subTokenPool: newPool });
+    saveSubTokenPoolToLocal(newPool);
+  },
+
+  setSubTokenPoolItemBackImage: (id, backImageUrl) => {
+      const { subTokenPool } = get();
+      const newPool = subTokenPool.map(t => 
+        t.id === id ? { ...t, backImageUrl } : t
+      );
+      set({ subTokenPool: newPool });
+      saveSubTokenPoolToLocal(newPool);
+  },
+
+  removeSubTokenFromPool: (id) => {
+    const { subTokenPool } = get();
+    const newPool = subTokenPool.filter((t) => t.id !== id);
+    set({ subTokenPool: newPool });
+    saveSubTokenPoolToLocal(newPool);
+  },
+
+  clearSubTokenPool: () => {
+    set({ subTokenPool: [] });
+    saveSubTokenPoolToLocal([]);
+  },
+
+  bindSubTokensToMain: (mainPoolId, subId) => {
+      const { tokenPool } = get();
+      const newPool = tokenPool.map(t => {
+          if (t.id === mainPoolId) {
+              return { ...t, splitBinding: subId };
+          }
+          return t;
+      });
+      set({ tokenPool: newPool });
+      saveTokenPoolToLocal(newPool);
+  },
+
+  bindSubTokenToMapItem: (itemId, subId) => {
+      const { items } = get();
+      const newItems = items.map(t => {
+          if (t.id === itemId) {
+              return { ...t, splitBinding: subId };
+          }
+          return t;
+      });
+      set({ items: newItems });
+      saveItemsToLocal(newItems);
+  },
+
+  // Map Actions
+
+  splitMapItem: (id) => {
+      const { items, tokenPool, subTokenPool } = get();
+      const item = items.find(t => t.id === id);
+      console.log('Split DEBUG - Instance item:', item);
+      
+      if (!item) {
+          console.log('Split FAILED - Item not found');
+          return;
+      }
+
+      // If we already have the splitBinding ID on the item, use it to find the template
+      let subTemplate = null;
+      if (item.splitBinding) {
+          console.log('Split DEBUG - Using splitBinding from item:', item.splitBinding);
+          subTemplate = subTokenPool.find(s => s.id === item.splitBinding);
+      }
+
+      // Fallback: If no template found yet, try finding via basePoolId (original logic)
+      if (!subTemplate && item.basePoolId) {
+          console.log('Split DEBUG - Falling back to basePoolId lookup:', item.basePoolId);
+          const baseItem = tokenPool.find(p => p.id === item.basePoolId);
+          if (baseItem && baseItem.splitBinding) {
+              subTemplate = subTokenPool.find(s => s.id === baseItem.splitBinding);
+          }
+      }
+
+      if (!subTemplate) {
+          console.log('Split FAILED - Could not find sub-token template in subTokenPool. Template ID might be missing or pool was cleared.');
+          return;
+      }
+
+      console.log('Split SUCCESS - Found template:', subTemplate.id);
+      // Remove parent
+      const newItemsFilter = items.filter(t => t.id !== id);
+      
+      const maxZ = items.reduce((max, t) => Math.max(max, t.zIndex), 0);
+      
+      const sub1Instance: MapItem = {
+          id: `item-sub-1-${Date.now()}`,
+          imageUrl: subTemplate.imageUrl,
+          backImageUrl: subTemplate.backImageUrl,
+          x: item.x - 5,
+          y: item.y - 5,
+          scaleX: item.scaleX,
+          scaleY: item.scaleY,
+          zIndex: maxZ + 1,
+          itemType: 'token',
+          isSubToken: true,
+          parentInstanceId: id,
+          basePoolId: subTemplate.id,
+          parentBasePoolId: item.basePoolId, // Keep record of who the original parent template was
+          parentImageUrl: item.imageUrl, // Store parent image for standalone merge
+          parentBackImageUrl: item.backImageUrl // Store parent back image for standalone merge
+      };
+
+      const sub2Instance: MapItem = {
+          id: `item-sub-2-${Date.now()}`,
+          imageUrl: subTemplate.imageUrl,
+          backImageUrl: subTemplate.backImageUrl,
+          x: item.x + 5,
+          y: item.y + 5,
+          scaleX: item.scaleX,
+          scaleY: item.scaleY,
+          zIndex: maxZ + 2,
+          itemType: 'token',
+          isSubToken: true,
+          parentInstanceId: id,
+          basePoolId: subTemplate.id,
+          parentBasePoolId: item.basePoolId, // Keep record of who the original parent template was
+          parentImageUrl: item.imageUrl, // Store parent image for standalone merge
+          parentBackImageUrl: item.backImageUrl // Store parent back image for standalone merge
+      };
+
+      const finalItems = [...newItemsFilter, sub1Instance, sub2Instance];
+      set({ items: finalItems });
+      saveItemsToLocal(finalItems);
+  },
+
+  mergeMapItems: (idA, idB) => {
+      const { items, tokenPool } = get();
+      const itemA = items.find(t => t.id === idA);
+      const itemB = items.find(t => t.id === idB);
+
+      console.log('Merge DEBUG - Items:', { itemA, itemB });
+
+      if (!itemA || !itemB || !itemA.isSubToken || !itemB.isSubToken) {
+          console.log('Merge FAILED - Not sub-tokens or items not found');
+          return;
+      }
+      
+      // Allow merge if they have the same parentInstanceId OR if they share the same base template
+      // This makes it more robust if parentInstanceId is lost or inconsistent
+      const isSameParent = itemA.parentInstanceId === itemB.parentInstanceId;
+      const isSameTemplate = itemA.basePoolId === itemB.basePoolId;
+      
+      if (!isSameTemplate) {
+          console.log('Merge FAILED - Items are not the same sub-token type (basePoolId mismatch)');
+          return;
+      }
+
+      // Find original parent pool item
+      // We look for a main token template that has this sub-token as its splitBinding
+      // OR if the item was restored before and has a basePoolId record
+      const mainPoolItem = tokenPool.find(p => p.splitBinding === itemA.basePoolId || (itemA.parentBasePoolId && p.id === itemA.parentBasePoolId));
+      console.log('Merge DEBUG - Parent Template found from pool:', mainPoolItem);
+
+      // Determine images to use: Prefer live pool item, fallback to cached images on sub-token
+      const imageUrl = mainPoolItem ? mainPoolItem.imageUrl : itemA.parentImageUrl;
+      const backImageUrl = mainPoolItem ? mainPoolItem.backImageUrl : itemA.parentBackImageUrl;
+
+      if (!imageUrl) {
+          console.log('Merge FAILED - No parent image available (pool item deleted and no cached image)');
+          return;
+      }
+
+      // Remove sub-tokens
+      const newItemsFilter = items.filter(t => t.id !== idA && t.id !== idB);
+      
+      const maxZ = items.reduce((max, t) => Math.max(max, t.zIndex), 0);
+      
+      const restoredItem: MapItem = {
+          id: itemA.parentInstanceId || `item-restored-${Date.now()}`,
+          imageUrl: imageUrl,
+          backImageUrl: backImageUrl,
+          x: (itemA.x + itemB.x) / 2,
+          y: (itemA.y + itemB.y) / 2,
+          scaleX: itemA.scaleX,
+          scaleY: itemA.scaleY,
+          zIndex: maxZ + 1,
+          itemType: 'token',
+          basePoolId: mainPoolItem ? mainPoolItem.id : itemA.parentBasePoolId,
+          splitBinding: itemA.basePoolId // Re-inject the binding
+      };
+
+      console.log('Merge SUCCESS - Restoring parent:', restoredItem.id);
+      const finalItems = [...newItemsFilter, restoredItem];
+      set({ items: finalItems });
+      saveItemsToLocal(finalItems);
+  },
+
+  setItemBackImage: (id, backImageUrl) => {
+    const { items } = get();
+    const newItems = items.map(t => 
+        t.id === id ? { ...t, backImageUrl } : t
+    );
+    set({ items: newItems });
+    saveItemsToLocal(newItems);
+  },
+
   addTablesToPool: (imageUrls) => {
     const { tablePool } = get();
      const newItems = imageUrls.map(url => ({
@@ -758,6 +1003,11 @@ export const useTokenStore = create<ItemState>((set, get) => ({
       const storedTokenPool = await localforage.getItem<PoolItem[]>('wargame_token_pool');
       if (storedTokenPool && Array.isArray(storedTokenPool)) {
         set({ tokenPool: storedTokenPool });
+      }
+
+      const storedSubTokenPool = await localforage.getItem<PoolItem[]>('wargame_sub_token_pool');
+      if (storedSubTokenPool && Array.isArray(storedSubTokenPool)) {
+        set({ subTokenPool: storedSubTokenPool });
       }
 
       const storedTablePool = await localforage.getItem<PoolItem[]>('wargame_table_pool');

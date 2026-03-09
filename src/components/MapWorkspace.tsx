@@ -23,6 +23,8 @@ const MapItemImage: React.FC<{
   const moveTokenToZone = useTokenStore((state) => state.moveTokenToZone);
   const deleteToken = useTokenStore((state) => state.deleteToken);
   const cloneToken = useTokenStore((state) => state.cloneToken);
+  const splitMapItem = useTokenStore((state) => state.splitMapItem);
+  const setItemBackImage = useTokenStore((state) => state.setItemBackImage);
   const globalTokenScale = useTokenStore((state) => state.globalTokenScale);
   const getStackedTokenIds = useTokenStore((state) => state.getStackedTokenIds);
   const updateMarkerSizeInPool = useTokenStore((state) => state.updateMarkerSizeInPool);
@@ -300,16 +302,26 @@ const MapWorkspace: React.FC<MapWorkspaceProps> = ({ mapBase64 }) => {
       tokenId: string | null;
   }>({ visible: false, x: 0, y: 0, tokenId: null });
 
+  const [subTokenSelector, setSubTokenSelector] = useState<{
+      visible: boolean;
+      tokenId: string | null;
+  }>({ visible: false, tokenId: null });
+
   const [image] = useImage(mapBase64 || '', "anonymous");
 
   // Store
   const items = useTokenStore((state) => state.items);
+  const subTokenPool = useTokenStore((state) => state.subTokenPool);
   const graveyards = useTokenStore((state) => state.graveyards);
   const drawBags = useTokenStore((state) => state.drawBags);
   const loadItems = useTokenStore((state) => state.loadItems);
   const addItem = useTokenStore((state) => state.addItem);
   const deleteToken = useTokenStore((state) => state.deleteToken);
   const cloneToken = useTokenStore((state) => state.cloneToken);
+  const splitMapItem = useTokenStore((state) => state.splitMapItem);
+  const mergeMapItems = useTokenStore((state) => state.mergeMapItems);
+  const bindSubTokenToMapItem = useTokenStore((state) => state.bindSubTokenToMapItem);
+  const setItemBackImage = useTokenStore((state) => state.setItemBackImage);
   const toggleTokenActivation = useTokenStore((state) => state.toggleTokenActivation);
   const restoreTokenToMap = useTokenStore((state) => state.restoreTokenToMap);
   const drawRandomToken = useTokenStore((state) => state.drawRandomToken);
@@ -587,7 +599,9 @@ const MapWorkspace: React.FC<MapWorkspaceProps> = ({ mapBase64 }) => {
             y: y - offset,
             scaleX: initialItemScale,
             scaleY: initialItemScale,
-            isMarker
+            isMarker,
+            basePoolId: poolItemId,
+            splitBinding: parsedData.splitBinding
          });
 
          // If it came from the pool, remove it now that it's on the map
@@ -803,6 +817,10 @@ const MapWorkspace: React.FC<MapWorkspaceProps> = ({ mapBase64 }) => {
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
             >
+                <div className="px-3 py-1 text-[10px] text-gray-500 uppercase font-bold tracking-widest border-b border-gray-800 mb-1">
+                    算子操作
+                </div>
+                
                 <button 
                     onClick={() => {
                         if (contextMenu.tokenId) cloneToken(contextMenu.tokenId);
@@ -810,8 +828,90 @@ const MapWorkspace: React.FC<MapWorkspaceProps> = ({ mapBase64 }) => {
                     }}
                     className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-blue-600 flex items-center gap-2 transition-colors duration-150"
                 >
-                    <span>👯</span> 克隆/拆分该算子
+                    <span>👯</span> 克隆该算子
                 </button>
+
+                {(() => {
+                    const selectedItem = items.find(i => i.id === contextMenu.tokenId);
+                    if (!selectedItem || selectedItem.itemType !== 'token') return null;
+
+                    // Check if it's a main token with binding
+                    const hasBinding = selectedItem.splitBinding;
+                    
+                    // Check for merge possibility - Increased range to 100 pixels
+                    const nearby = items.filter(i => 
+                        i.id !== selectedItem.id && 
+                        i.isSubToken && 
+                        selectedItem.isSubToken && 
+                        // Shared ancestry check (parentInstanceId or at least the same template)
+                        (i.parentInstanceId === selectedItem.parentInstanceId || i.basePoolId === selectedItem.basePoolId) &&
+                        Math.abs(i.x - selectedItem.x) < 100 &&
+                        Math.abs(i.y - selectedItem.y) < 100
+                    );
+
+                    return (
+                        <>
+                            {hasBinding ? (
+                                <button 
+                                    onClick={() => {
+                                        splitMapItem(selectedItem.id);
+                                        setContextMenu({ ...contextMenu, visible: false });
+                                    }}
+                                    className="w-full text-left px-4 py-2 text-sm text-yellow-400 hover:bg-yellow-600 hover:text-white flex items-center gap-2 transition-colors duration-150"
+                                >
+                                    <span>✂️</span> 拆分为子算子
+                                </button>
+                            ) : (
+                                <button 
+                                    onClick={() => {
+                                        setSubTokenSelector({ visible: true, tokenId: selectedItem.id });
+                                        setContextMenu({ ...contextMenu, visible: false });
+                                    }}
+                                    className="w-full text-left px-4 py-2 text-sm text-purple-400 hover:bg-purple-600 hover:text-white flex items-center gap-2 transition-colors duration-150"
+                                >
+                                    <span>🔗</span> 绑定拆分算子
+                                </button>
+                            )}
+                            
+                            {nearby.length > 0 && (
+                                <button 
+                                    onClick={() => {
+                                        mergeMapItems(selectedItem.id, nearby[0].id);
+                                        setContextMenu({ ...contextMenu, visible: false });
+                                    }}
+                                    className="w-full text-left px-4 py-2 text-sm text-green-400 hover:bg-green-600 hover:text-white flex items-center gap-2 transition-colors duration-150"
+                                >
+                                    <span>🧩</span> 合并为父算子
+                                </button>
+                            )}
+
+                            <button 
+                                onClick={() => {
+                                    const input = document.createElement('input');
+                                    input.type = 'file';
+                                    input.accept = 'image/*';
+                                    input.onchange = async (e) => {
+                                        const file = (e.target as HTMLInputElement).files?.[0];
+                                        if (file) {
+                                            const reader = new FileReader();
+                                            reader.onload = (re) => {
+                                                const base64 = re.target?.result as string;
+                                                setItemBackImage(selectedItem.id, base64);
+                                            };
+                                            reader.readAsDataURL(file);
+                                        }
+                                    };
+                                    input.click();
+                                    setContextMenu({ ...contextMenu, visible: false });
+                                }}
+                                className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-blue-600 flex items-center gap-2 transition-colors duration-150"
+                            >
+                                <span>🖼️</span> 设置该算子背面
+                            </button>
+                        </>
+                    );
+                })()}
+
                 <button 
                     onClick={() => {
                         if (contextMenu.tokenId) {
@@ -832,6 +932,65 @@ const MapWorkspace: React.FC<MapWorkspaceProps> = ({ mapBase64 }) => {
                 >
                     <span>❌</span> 取消操作
                 </button>
+            </div>
+        )}
+
+        {/* Sub-token Selector Dialog */}
+        {subTokenSelector.visible && (
+            <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-2xl w-full max-w-md flex flex-col max-h-[80vh]">
+                    <div className="p-4 border-b border-gray-700 flex justify-between items-center">
+                        <h3 className="text-lg font-bold text-gray-100 flex items-center gap-2">
+                            <span>🔗</span> 为算子绑定拆分对象
+                        </h3>
+                        <button 
+                            onClick={() => setSubTokenSelector({ visible: false, tokenId: null })}
+                            className="text-gray-400 hover:text-white"
+                        >
+                            ×
+                        </button>
+                    </div>
+                    
+                    <div className="p-4 overflow-y-auto">
+                        <p className="text-sm text-gray-400 mb-4">请选择一个子算库中的算子。绑定后，该算子可以被拆分为两个所选子算子。</p>
+                        
+                        <div className="grid grid-cols-4 gap-3">
+                            {subTokenPool.map((token) => (
+                                <button
+                                    key={token.id}
+                                    onClick={() => {
+                                        if (subTokenSelector.tokenId) {
+                                            bindSubTokenToMapItem(subTokenSelector.tokenId, token.id);
+                                            setSubTokenSelector({ visible: false, tokenId: null });
+                                            alert('绑定成功！现在可以右键拆分该算子了。');
+                                        }
+                                    }}
+                                    className="aspect-square bg-gray-800 rounded border border-gray-600 overflow-hidden hover:border-purple-500 hover:shadow-lg transition-all p-1 group"
+                                >
+                                    <img 
+                                        src={token.imageUrl} 
+                                        alt="Sub Token" 
+                                        className="w-full h-full object-contain"
+                                    />
+                                </button>
+                            ))}
+                            {subTokenPool.length === 0 && (
+                                <div className="col-span-4 py-8 text-center text-gray-500 text-sm italic">
+                                    子算子库为空，请先在侧边栏上传子算子。
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    
+                    <div className="p-4 border-t border-gray-700 flex justify-end">
+                        <button 
+                            onClick={() => setSubTokenSelector({ visible: false, tokenId: null })}
+                            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded text-sm transition-colors"
+                        >
+                            取消
+                        </button>
+                    </div>
+                </div>
             </div>
         )}
       </div>
