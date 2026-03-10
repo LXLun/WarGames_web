@@ -90,4 +90,6 @@ npm run build
 
 ## 📄 License
 
+## todo
+增加双人联机对战功能
 MIT License
