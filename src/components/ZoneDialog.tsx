@@ -47,15 +47,25 @@ const ZoneDialog: React.FC<ZoneDialogProps> = ({
 
   if (!isOpen) return null;
 
-  const handleDragStart = (e: React.DragEvent<HTMLImageElement> | React.DragEvent<HTMLDivElement>, token: MapItem) => {
-    e.dataTransfer.setData('wargame-item', JSON.stringify({
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, token: MapItem) => {
+    // Crucial: Set standard data that MapWorkspace expects
+    const dragData = {
       action: 'restore',
       tokenId: token.id,
+      itemType: token.itemType, 
       zoneType,
       zoneId,
-      src: token.imageUrl, // For preview if needed
-    }));
-    e.dataTransfer.effectAllowed = 'move';
+      // src: token.imageUrl, // Removed to prevent huge payload issues with Base64
+    };
+    
+    e.dataTransfer.setData('wargame-item', JSON.stringify(dragData));
+    // Skip setting large image data for legacy if not needed, improving performance
+    if (token.imageUrl && token.imageUrl.length < 1000) {
+        e.dataTransfer.setData('token-image', token.imageUrl);
+    }
+    e.dataTransfer.effectAllowed = 'copyMove';
+    
+    // Optional: Visual drag image (browser default is usually fine for div with img)
   };
 
   const handleConfirmUpload = () => {
@@ -361,7 +371,7 @@ const ZoneDialog: React.FC<ZoneDialogProps> = ({
                         key={token.id}
                         draggable={true}
                         onDragStart={(e) => handleDragStart(e, token)}
-                        className="group relative aspect-square bg-gray-700 rounded border border-gray-600 hover:border-blue-500 hover:shadow-md transition-all cursor-grab active:cursor-grabbing overflow-hidden p-1 flex items-center justify-center"
+                        className="group relative aspect-square bg-gray-700 rounded border border-gray-600 hover:border-blue-500 hover:shadow-md transition-all cursor-grab active:cursor-grabbing overflow-hidden p-1 flex items-center justify-center pointer-events-auto"
                         title="拖拽回地图"
                       >
                          <img 

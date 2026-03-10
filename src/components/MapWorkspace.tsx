@@ -722,7 +722,13 @@ const MapWorkspace: React.FC<MapWorkspaceProps> = ({ mapBase64 }) => {
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
+    e.stopPropagation();
     e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
@@ -755,7 +761,8 @@ const MapWorkspace: React.FC<MapWorkspaceProps> = ({ mapBase64 }) => {
             restoreTokenId = parsed.tokenId;
             restoreZoneType = parsed.zoneType;
             restoreZoneId = parsed.zoneId;
-            imageUrl = parsed.src; // Just for reference
+            itemType = parsed.itemType || 'token';
+            imageUrl = 'restore-placeholder'; // Ensure we enter the 'if' block below
         } else if (parsed.type === 'marker') {
             imageUrl = parsed.src;
             itemType = 'token'; // Markers are handled as small tokens
@@ -790,9 +797,13 @@ const MapWorkspace: React.FC<MapWorkspaceProps> = ({ mapBase64 }) => {
       const fromPool = parsedData.fromPool;
       const poolItemId = parsedData.id;
 
-      if (action === 'restore') {
+
+    // Crucial: Handle restoration from zone
+    if (action === 'restore') {
           restoreTokenToMap(restoreTokenId, restoreZoneType as 'graveyard' | 'bag', restoreZoneId, x - offset, y - offset);
+          
       } else if (imageUrl) {
+         // Create New Item from Pool
          addItem({
             imageUrl,
             backImageUrl,
@@ -913,6 +924,7 @@ const MapWorkspace: React.FC<MapWorkspaceProps> = ({ mapBase64 }) => {
       <div 
         className="flex-1 overflow-hidden relative bg-gray-900/50"
         onDragOver={handleDragOver}
+        onDragEnter={handleDragEnter}
         onDrop={handleDrop}
       >
         {!mapBase64 ? (

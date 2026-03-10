@@ -772,6 +772,28 @@ const Sidebar: React.FC<SidebarProps> = ({ onMapUpload, onMapClear, hasMap }) =>
 
       </div>
 
+      {/* Turn Control - Fixed at Bottom */}
+      <div className="flex-none p-4 border-t-2 border-gray-700 bg-gray-900 z-20">
+          <div className="flex items-center justify-between mb-4">
+              <span className="text-gray-400 font-bold uppercase text-xs tracking-wider">当前回合</span>
+              <div className="flex items-baseline gap-1">
+                  <span className="text-sm text-gray-500">TURN</span>
+                  <span className="text-3xl font-mono font-black text-yellow-500 drop-shadow-md">{turnNumber}</span>
+              </div>
+          </div>
+          <button
+              onClick={() => {
+                  if (window.confirm('确定要结束当前回合吗？所有「已行动」算子将重置状态。')) {
+                      nextTurn();
+                  }
+              }}
+              className="w-full bg-gradient-to-br from-orange-600 to-red-700 hover:from-orange-500 hover:to-red-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transform active:scale-[0.98] transition-all flex items-center justify-center gap-3 border border-white/10"
+          >
+              <span className="text-xl">⏳</span> 
+              <span>结束本回合</span>
+          </button>
+      </div>
+
     </aside>
   );
 };

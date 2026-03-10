@@ -601,7 +601,10 @@ export const useTokenStore = create<ItemState>((set, get) => ({
             ...token,
             x,
             y,
-            zIndex: maxZIndex + 1
+            startX: x, // Reset start position to new drop location
+            startY: y, // Reset start position to new drop location
+            zIndex: maxZIndex + 1,
+            isActivated: false // Reset activation state
         };
         const newItems = [...items, mapItem];
         set({ items: newItems });
@@ -635,7 +638,10 @@ export const useTokenStore = create<ItemState>((set, get) => ({
           ...token,
           x,
           y,
-          zIndex: maxZIndex + 1
+          startX: x, // Reset start position
+          startY: y, // Reset start position
+          zIndex: maxZIndex + 1,
+          isActivated: false // Reset activation state
       };
       const newItems = [...items, mapItem];
       set({ items: newItems });
