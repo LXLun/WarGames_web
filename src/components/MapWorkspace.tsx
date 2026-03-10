@@ -65,6 +65,8 @@ const areItemPropsEqual = (prevProps: any, nextProps: any) => {
     p.backImageUrl === n.backImageUrl &&
     p.isFlipped === n.isFlipped &&
     p.isActivated === n.isActivated &&
+    p.startX === n.startX &&
+    p.startY === n.startY &&
     p.itemType === n.itemType &&
     p.zIndex === n.zIndex &&
     p.splitBinding === n.splitBinding &&
