@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
-import { Stage, Layer, Image as KonvaImage, Transformer, Group, Circle, Line, Text } from 'react-konva';
+import { Stage, Layer, Image as KonvaImage, Transformer, Group, Circle, Line, Text, Arrow } from 'react-konva';
 import Konva from 'konva';
 import { useTokenStore, MapItem } from '../stores/useTokenStore';
 import ZoneDialog from './ZoneDialog';
@@ -97,6 +97,7 @@ const MapItemImageComponent: React.FC<{
   const getStackedTokenIds = useTokenStore((state) => state.getStackedTokenIds);
   const updateMarkerSizeInPool = useTokenStore((state) => state.updateMarkerSizeInPool);
   const toggleTokenActivation = useTokenStore((state) => state.toggleTokenActivation);
+  const isSetupMode = useTokenStore((state) => state.isSetupMode);
   
   // Use Group Ref (since we wrap everything in group)
   const shapeRef = useRef<Konva.Group>(null);
@@ -126,9 +127,79 @@ const MapItemImageComponent: React.FC<{
   
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [dragCurrentPos, setDragCurrentPos] = useState({ x: item.x, y: item.y });
   const isActive = item.isActivated;
   const effectiveScaleX = (isHovered || isDragging) ? scaleX * 1.1 : scaleX;
   const effectiveScaleY = (isHovered || isDragging) ? scaleY * 1.1 : scaleY;
+
+  // Calculate start position from center
+  const startX = (item.startX ?? item.x) + (width * scaleX) / 2;
+  const startY = (item.startY ?? item.y) + (height * scaleY) / 2;
+  const currentCenterX = dragCurrentPos.x + (width * scaleX) / 2;
+  const currentCenterY = dragCurrentPos.y + (height * scaleY) / 2;
+
+  const hasMoved = !isSetupMode && Math.sqrt(Math.pow(currentCenterX - startX, 2) + Math.pow(currentCenterY - startY, 2)) > 10;
+
+  // Generate a random curvature for this movement session
+  const randomCurvatureRef = useRef((Math.random() - 0.5) * 100); 
+  
+  // Update curvature only when starting a new move (or entering a move state)
+  useEffect(() => {
+    if (isDragging) {
+      // Small random offset for the control point to create organic curvature
+      randomCurvatureRef.current = (Math.random() - 0.5) * 80;
+    }
+  }, [isDragging]);
+
+  // Calculate the interception point at the edge of the token's square boundary
+  const getInterceptionPoint = () => {
+    const dx = currentCenterX - startX;
+    const dy = currentCenterY - startY;
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+    
+    if (absDx < 5 || absDy < 5) return { x: startX, y: startY };
+
+    // Standard half-size of token (100 * scale / 2)
+    const halfSize = (50 * scaleX); 
+    
+    // Scale based on which side it hits first
+    const scale = Math.min(halfSize / absDx, halfSize / absDy);
+    
+    return {
+      x: currentCenterX - dx * scale,
+      y: currentCenterY - dy * scale
+    };
+  };
+
+  const interception = getInterceptionPoint();
+
+  // Create points for a quadratic curve: [start, midpoint+offset, end]
+  const curvePoints = useMemo(() => {
+    if (!hasMoved) return [startX, startY, startX, startY];
+    
+    // Midpoint
+    const midX = (startX + interception.x) / 2;
+    const midY = (startY + interception.y) / 2;
+
+    // Normal vector for offset (perpendicular to direction)
+    const dx = interception.x - startX;
+    const dy = interception.y - startY;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    
+    // Offset the midpoint by the random curvature amount
+    const offsetX = (-dy / len) * randomCurvatureRef.current;
+    const offsetY = (dx / len) * randomCurvatureRef.current;
+
+    return [startX, startY, midX + offsetX, midY + offsetY, interception.x, interception.y];
+  }, [startX, startY, interception.x, interception.y, hasMoved]);
+
+  useEffect(() => {
+    // Keep internal drag pos in sync with item x/y when not dragging
+    if (!isDragging) {
+      setDragCurrentPos({ x: item.x, y: item.y });
+    }
+  }, [item.x, item.y, isDragging]);
 
   useEffect(() => {
     // Sync scale smoothly if not interacting
@@ -143,6 +214,41 @@ const MapItemImageComponent: React.FC<{
 
   return (
     <>
+      {/* Movement Arrow Segment - Quadratic Curve to Edge */}
+      {!isSetupMode && hasMoved && (
+          <Arrow
+            points={curvePoints}
+            stroke="#ef4444"
+            strokeWidth={4}
+            opacity={isDragging ? 0.6 : 0.8}
+            pointerLength={12}
+            pointerWidth={12}
+            lineCap="round"
+            lineJoin="round"
+            dash={[8, 4]} 
+            tension={0.5} // Allow smooth curve through mid-point
+            shadowColor="black"
+            shadowBlur={2}
+            shadowOpacity={0.5}
+          />
+      )}
+      {/* Snapshot of movement distance while hovering/dragging */}
+      {!isSetupMode && (isHovered || isDragging) && hasMoved && (
+          <Group x={currentCenterX} y={currentCenterY - 40}>
+            <Circle radius={18} fill="black" opacity={0.6} stroke="white" strokeWidth={1} />
+            <Text 
+               text={Math.round(Math.sqrt(Math.pow(currentCenterX - startX, 2) + Math.pow(currentCenterY - startY, 2)) / 5).toString()} 
+               fontSize={12}
+               fill="white"
+               fontStyle="bold"
+               align="center"
+               width={36}
+               x={-18}
+               y={-6}
+            />
+          </Group>
+      )}
+
       <Group
         ref={shapeRef}
         x={item.x}
@@ -156,6 +262,7 @@ const MapItemImageComponent: React.FC<{
           onSelect(item.id);
           bringToFront(item.id);
           setIsDragging(true);
+          setDragCurrentPos({ x: e.target.x(), y: e.target.y() });
           
           // Allow splitting stack with Shift key
           if (e.evt.shiftKey) {
@@ -193,6 +300,7 @@ const MapItemImageComponent: React.FC<{
         }}
         onDragMove={(e) => {
              e.cancelBubble = true;
+             setDragCurrentPos({ x: e.target.x(), y: e.target.y() });
              
              // Sync Move Stack
              if (initialPointerRef.current && Object.keys(stackedPositionsRef.current).length > 1) {
@@ -215,6 +323,7 @@ const MapItemImageComponent: React.FC<{
         }}
         onDragEnd={(e) => {
           e.cancelBubble = true;
+          setDragCurrentPos({ x: e.target.x(), y: e.target.y() });
           
           const stage = e.target.getStage();
           const stackedKeys = Object.keys(stackedPositionsRef.current);
@@ -307,14 +416,28 @@ const MapItemImageComponent: React.FC<{
             height={height}
             // Visual Enhancements
             opacity={isActive ? 0.6 : 1}
-            stroke={isActive ? "#4b5563" : ((isHovered || isDragging) ? "#ffff00" : "white")}
+            stroke={isActive ? "#4b5563" : ((isHovered || isDragging) ? (hasMoved ? "#ef4444" : "#ffff00") : (hasMoved ? "#ef4444" : "white"))}
             strokeWidth={isActive ? 3 : ((isHovered || isDragging) ? 5 : 3)}
-            shadowColor="black"
+            shadowColor={hasMoved ? "#ef4444" : "black"}
             shadowBlur={(isHovered || isDragging) ? 20 : 10}
             shadowOffset={(isHovered || isDragging) ? { x: 8, y: 8 } : { x: 5, y: 5 }}
-            shadowOpacity={0.6}
+            shadowOpacity={hasMoved ? 0.8 : 0.6}
             // imageSmoothingEnabled={false} // Uncomment for pixel art style
         />
+        {hasMoved && !isActive && (
+            <Text 
+                text="MV"
+                x={5}
+                y={5}
+                fontSize={12}
+                fontStyle="bold"
+                fill="white"
+                shadowColor="black"
+                shadowBlur={2}
+                padding={2}
+                fillAfterStrokeEnabled
+            />
+        )}
         {isActive && (
             <Circle 
                 x={width - 8}

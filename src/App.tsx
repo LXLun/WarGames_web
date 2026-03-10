@@ -36,6 +36,9 @@ const Sidebar: React.FC<SidebarProps> = ({ onMapUpload, onMapClear, hasMap }) =>
   const setGlobalTokenScale = useTokenStore((state) => state.setGlobalTokenScale);
   const turnNumber = useTokenStore((state) => state.turnNumber);
   const nextTurn = useTokenStore((state) => state.nextTurn);
+  const isSetupMode = useTokenStore((state) => state.isSetupMode);
+  const startGame = useTokenStore((state) => state.startGame);
+  const enterSetupMode = useTokenStore((state) => state.enterSetupMode);
   const saveCurrentAsInitial = useTokenStore((state) => state.saveCurrentAsInitial);
   const resetToInitial = useTokenStore((state) => state.resetToInitial);
   const initialSetupSnapshot = useTokenStore((state) => state.initialSetupSnapshot);
@@ -301,31 +304,74 @@ const Sidebar: React.FC<SidebarProps> = ({ onMapUpload, onMapClear, hasMap }) =>
             </button>
             )}
 
-            <div className="grid grid-cols-2 gap-2">
-                <button 
-                    onClick={() => {
-                        if (window.confirm('将当前棋局保存为初始设置？')) {
-                            saveCurrentAsInitial();
-                        }
-                    }}
-                    className="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-2 px-1 rounded text-xs transition-colors duration-200 flex items-center justify-center gap-1"
-                    title="保存当前位置和映射作为初始设置"
-                >
-                    <span>📌</span> 保存初设
-                </button>
+            <div className="flex flex-col gap-2 p-3 bg-gray-800/50 rounded-lg border border-gray-700/50">
+                <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-gray-400">当前模式</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-tighter ${isSetupMode ? 'bg-yellow-500/20 text-yellow-500' : 'bg-green-500/20 text-green-500'}`}>
+                        {isSetupMode ? '初设中' : '竞技中'}
+                    </span>
+                </div>
+
+                {isSetupMode ? (
+                    <div className="flex flex-col gap-2">
+                        <button 
+                            onClick={() => {
+                                if (window.confirm('将当前棋局保存为初始设置？')) {
+                                    saveCurrentAsInitial();
+                                }
+                            }}
+                            className="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded transition-all active:scale-95 flex items-center justify-center gap-2"
+                        >
+                            <span>📌</span> 保存当前为初设
+                        </button>
+                        <button 
+                            onClick={() => {
+                                if (window.confirm('确定要开始游戏吗？系统将锁定初设并开启第一回合。')) {
+                                    startGame();
+                                }
+                            }}
+                            className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded shadow-lg shadow-green-900/20 transition-all hover:scale-[1.02] active:scale-95 flex flex-col items-center leading-tight"
+                        >
+                            <span className="text-lg">⚔️ 开始游戏</span>
+                            <span className="text-[10px] opacity-80 font-normal">开始第一回合</span>
+                        </button>
+                    </div>
+                ) : (
+                    <div className="flex flex-col gap-2">
+                         <div className="flex items-center justify-between bg-blue-900/30 p-2 rounded border border-blue-500/30">
+                            <span className="text-sm font-bold text-blue-400">TURN {turnNumber}</span>
+                            <button 
+                                onClick={nextTurn}
+                                className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold py-1 px-3 rounded shadow-md transition-all active:scale-90 flex items-center gap-1"
+                            >
+                                下一回合 <span>➡️</span>
+                            </button>
+                        </div>
+                        <button 
+                            onClick={() => {
+                                if (window.confirm('回到初设模式可以重新调整初始布局。确定吗？')) {
+                                    enterSetupMode();
+                                }
+                            }}
+                            className="w-full bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs py-1.5 px-4 rounded transition-colors flex items-center justify-center gap-2"
+                        >
+                            <span>🛠️</span> 返回初设模式
+                        </button>
+                    </div>
+                )}
+
                 <button 
                     onClick={() => {
                         const message = initialSetupSnapshot 
                             ? '确定要还原到初始设置吗？当前进度将丢失。' 
-                            : '当前未保存初设，确定要清空所有算子、区域数据并重置回合吗？';
+                            : '当前未保存初设，确定要清空所有算子、区域数据并重置吗？';
                         if (window.confirm(message)) {
                             resetToInitial();
                         }
                     }}
-                    className={`bg-orange-600 hover:bg-orange-700 text-white font-semibold py-2 px-1 rounded text-xs transition-colors duration-200 flex items-center justify-center gap-1`}
-                    title={initialSetupSnapshot ? "还原到保存的初始位置" : "清空所有棋局数据"}
+                    className="w-full bg-orange-600/20 hover:bg-orange-600/30 text-orange-400 border border-orange-600/30 font-bold py-2 px-4 rounded text-xs transition-all active:scale-95 flex items-center justify-center gap-2"
                 >
-                    <span>🔄</span> {initialSetupSnapshot ? '还原初设' : '清空数据'}
+                    <span>🔄</span> {initialSetupSnapshot ? '重置到初设' : '清空数据'}
                 </button>
             </div>
 
@@ -726,46 +772,40 @@ const Sidebar: React.FC<SidebarProps> = ({ onMapUpload, onMapClear, hasMap }) =>
 
       </div>
 
-      {/* Turn Control - Fixed at Bottom */}
-      <div className="flex-none p-4 border-t-2 border-gray-700 bg-gray-900 z-20">
-          <div className="flex items-center justify-between mb-4">
-              <span className="text-gray-400 font-bold uppercase text-xs tracking-wider">当前回合</span>
-              <div className="flex items-baseline gap-1">
-                  <span className="text-sm text-gray-500">TURN</span>
-                  <span className="text-3xl font-mono font-black text-yellow-500 drop-shadow-md">{turnNumber}</span>
-              </div>
-          </div>
-          <button
-              onClick={() => {
-                  if (window.confirm('确定要结束当前回合吗？所有「已行动」算子将重置状态。')) {
-                      nextTurn();
-                  }
-              }}
-              className="w-full bg-gradient-to-br from-orange-600 to-red-700 hover:from-orange-500 hover:to-red-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transform active:scale-[0.98] transition-all flex items-center justify-center gap-3 border border-white/10"
-          >
-              <span className="text-xl">⏳</span> 
-              <span>结束本回合</span>
-          </button>
-      </div>
-
     </aside>
   );
 };
 
 const App: React.FC = () => {
   const { mapBase64, saveMap, clearMap } = useMapStorage();
+  const isSetupMode = useTokenStore((state) => state.isSetupMode);
 
   return (
     <div className="flex h-screen w-screen bg-gray-900 text-white overflow-hidden relative">
       <Sidebar onMapUpload={saveMap} onMapClear={clearMap} hasMap={!!mapBase64} />
       
       {/* Container for Map and Overlays */}
-      <div className="flex-1 relative overflow-hidden">
-         <MapWorkspace mapBase64={mapBase64} />
-         
-         {/* Top-left Overlay for Dice Roller */}
-         <div className="absolute top-4 left-4 z-20">
-            <DiceRoller />
+      <div className="flex-1 relative overflow-hidden flex flex-col">
+         {/* Top Banner for Setup Mode */}
+         {isSetupMode && (
+            <div className="w-full bg-yellow-500/10 border-b border-yellow-500/30 py-1 px-4 flex items-center justify-between text-yellow-500 animate-in fade-in slide-in-from-top-1 duration-500">
+               <div className="flex items-center gap-2">
+                  <span className="animate-pulse">🛠️</span>
+                  <span className="text-[10px] font-bold tracking-widest uppercase">初设模式中 - 请摆放算子并点击“保存初设”</span>
+               </div>
+               <div className="text-[10px] opacity-70 italic font-mono">
+                  Initial Setup Phase
+               </div>
+            </div>
+         )}
+
+         <div className="flex-1 relative overflow-hidden">
+            <MapWorkspace mapBase64={mapBase64} />
+            
+            {/* Top-left Overlay for Dice Roller */}
+            <div className="absolute top-4 left-4 z-20">
+               <DiceRoller />
+            </div>
          </div>
       </div>
 

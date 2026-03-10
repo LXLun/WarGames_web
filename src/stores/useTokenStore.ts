@@ -68,6 +68,7 @@ interface ItemState {
   markerPool: PoolItem[];
   globalTokenScale: number;
   // Game State
+  isSetupMode: boolean;
   turnNumber: number;
   currentRoll: DiceRoll | null;
   initialSetupSnapshot: SetupSnapshot | null;
@@ -83,9 +84,11 @@ interface ItemState {
   deleteToken: (id: string) => void;
   cloneToken: (id: string) => void;
 
-  // Turn & Activation
+  // Turn & Game Control
   toggleTokenActivation: (id: string) => void;
   nextTurn: () => void;
+  startGame: () => void;
+  enterSetupMode: () => void;
 
   // Setup Management
   saveCurrentAsInitial: () => void;
@@ -213,6 +216,14 @@ const saveTurnNumberToLocal = async (turn: number) => {
   }
 };
 
+const saveSetupModeToLocal = async (isSetup: boolean) => {
+  try {
+    await localforage.setItem('wargame_setup_mode', isSetup);
+  } catch (error) {
+    console.error('Failed to save setup mode:', error);
+  }
+};
+
 const saveInitialSetupToLocal = async (snapshot: SetupSnapshot) => {
   try {
     await localforage.setItem('wargame_initial_setup', snapshot);
@@ -236,7 +247,8 @@ export const useTokenStore = create<ItemState>((set, get) => ({
   markerPool: [],
   globalTokenScale: 1,
   
-  turnNumber: 1, // Default turn
+  isSetupMode: true,
+  turnNumber: 1, 
   currentRoll: null,
   initialSetupSnapshot: null,
 
@@ -384,6 +396,19 @@ export const useTokenStore = create<ItemState>((set, get) => ({
     saveTurnNumberToLocal(newTurn);
   },
 
+  startGame: () => {
+    set({ isSetupMode: false, turnNumber: 1 });
+    saveSetupModeToLocal(false);
+    saveTurnNumberToLocal(1);
+    alert('游戏正式开始！第一回合');
+  },
+
+  enterSetupMode: () => {
+    set({ isSetupMode: true });
+    saveSetupModeToLocal(true);
+    alert('已进入初设模式');
+  },
+
   saveCurrentAsInitial: () => {
     const { items, graveyards, drawBags, globalTokenScale } = get();
     // Use JSON stringify/parse for deep copy
@@ -396,33 +421,14 @@ export const useTokenStore = create<ItemState>((set, get) => ({
     
     set({ initialSetupSnapshot: snapshot });
     saveInitialSetupToLocal(snapshot);
+    alert('初设状态已保存');
   },
 
   resetToInitial: () => {
     const { initialSetupSnapshot } = get();
     
     if (!initialSetupSnapshot) {
-      // 如果没有保存过初设，执行“彻底清空”操作
-      const emptyItems: MapItem[] = [];
-      const emptyGraveyards: Zone[] = [
-        { id: 'g1', name: '阵亡区 A', tokens: [] },
-        { id: 'g2', name: '阵亡区 B', tokens: [] }
-      ];
-      const emptyDrawBags: Zone[] = [
-        { id: 'b1', name: '抽签袋 1', tokens: [] }
-      ];
-      
-      set({ 
-        items: emptyItems,
-        graveyards: emptyGraveyards,
-        drawBags: emptyDrawBags,
-        turnNumber: 0
-      });
-
-      saveItemsToLocal(emptyItems);
-      saveGraveyardsToLocal(emptyGraveyards);
-      saveDrawBagsToLocal(emptyDrawBags);
-      saveTurnNumberToLocal(0);
+      alert('没有找到保存的初设状态');
       return;
     }
 
@@ -443,6 +449,7 @@ export const useTokenStore = create<ItemState>((set, get) => ({
     saveDrawBagsToLocal(snapshot.drawBags);
     saveGlobalScaleToLocal(snapshot.globalTokenScale);
     saveTurnNumberToLocal(1);
+    alert('已重置到初设状态');
   },
 
   rollDice: (sides, count) => {
@@ -1028,6 +1035,11 @@ export const useTokenStore = create<ItemState>((set, get) => ({
       const storedTurn = await localforage.getItem<number>('wargame_turn_number');
       if (typeof storedTurn === 'number') {
         set({ turnNumber: storedTurn });
+      }
+
+      const storedSetupMode = await localforage.getItem<boolean>('wargame_setup_mode');
+      if (typeof storedSetupMode === 'boolean') {
+        set({ isSetupMode: storedSetupMode });
       }
 
       const storedInitialSetup = await localforage.getItem<SetupSnapshot>('wargame_initial_setup');
