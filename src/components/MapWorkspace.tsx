@@ -1,20 +1,88 @@
-import React, { useRef, useState, useEffect, useLayoutEffect, useMemo } from 'react';
+import React, { useRef, useState, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import { Stage, Layer, Image as KonvaImage, Transformer, Group, Circle, Line, Text } from 'react-konva';
-import useImage from 'use-image';
 import Konva from 'konva';
 import { useTokenStore, MapItem } from '../stores/useTokenStore';
 import ZoneDialog from './ZoneDialog';
 
+// Global image cache to prevent redundant loading and decoding
+const imageCache = new Map<string, HTMLImageElement>();
+
+/**
+ * Custom hook to manage image loading with a global cache.
+ * Returns the HTMLImageElement once loaded.
+ */
+const useCachedImage = (url: string, crossOrigin: 'anonymous' | undefined = 'anonymous') => {
+  const [image, setImage] = useState<HTMLImageElement | undefined>(imageCache.get(url));
+
+  useEffect(() => {
+    if (!url) {
+      setImage(undefined);
+      return;
+    }
+
+    // Check cache first
+    const cached = imageCache.get(url);
+    if (cached) {
+      setImage(cached);
+      return;
+    }
+
+    // Start loading if not in cache
+    const img = new window.Image();
+    if (crossOrigin) img.crossOrigin = crossOrigin;
+    img.src = url;
+    
+    const handleLoad = () => {
+      imageCache.set(url, img);
+      setImage(img);
+    };
+
+    img.addEventListener('load', handleLoad);
+    return () => {
+      img.removeEventListener('load', handleLoad);
+    };
+  }, [url, crossOrigin]);
+
+  return [image];
+};
+
+// Custom comparison function for React.memo
+const areItemPropsEqual = (prevProps: any, nextProps: any) => {
+  // Check if component's own simple props changed
+  if (prevProps.isSelected !== nextProps.isSelected) return false;
+  
+  // Define deep comparison for the item object
+  const p = prevProps.item;
+  const n = nextProps.item;
+
+  return (
+    p.id === n.id &&
+    p.x === n.x &&
+    p.y === n.y &&
+    p.scaleX === n.scaleX &&
+    p.scaleY === n.scaleY &&
+    p.imageUrl === n.imageUrl &&
+    p.backImageUrl === n.backImageUrl &&
+    p.isFlipped === n.isFlipped &&
+    p.isActivated === n.isActivated &&
+    p.itemType === n.itemType &&
+    p.zIndex === n.zIndex &&
+    p.splitBinding === n.splitBinding &&
+    p.parentInstanceId === n.parentInstanceId &&
+    p.isSubToken === n.isSubToken
+  );
+};
+
 // Sub-component for individual Map Item (Token or Table)
-const MapItemImage: React.FC<{ 
+const MapItemImageComponent: React.FC<{ 
   item: MapItem; 
   isSelected: boolean; 
-  onSelect: () => void; 
+  onSelect: (id: string) => void; 
   onContextMenu: (e: Konva.KonvaEventObject<PointerEvent | MouseEvent>, id: string) => void;
   onHover: (id: string | null) => void;
 }> = ({ item, isSelected, onSelect, onContextMenu, onHover }) => {
   const imageUrl = (item.isFlipped && item.backImageUrl) ? item.backImageUrl : (item.imageUrl || '');
-  const [image] = useImage(imageUrl, 'anonymous');
+  const [image] = useCachedImage(imageUrl, 'anonymous');
   
   const updateItemPosition = useTokenStore((state) => state.updateItemPosition);
   const updateItemScale = useTokenStore((state) => state.updateItemScale);
@@ -85,7 +153,7 @@ const MapItemImage: React.FC<{
         draggable
         onDragStart={(e) => {
           e.cancelBubble = true;
-          onSelect();
+          onSelect(item.id);
           bringToFront(item.id);
           setIsDragging(true);
           
@@ -193,12 +261,12 @@ const MapItemImage: React.FC<{
         id={item.id} // Critical for findOne to work
         onClick={(e) => {
           e.cancelBubble = true;
-          onSelect();
+          onSelect(item.id);
           bringToFront(item.id);
         }}
         onTap={(e) => {
           e.cancelBubble = true;
-          onSelect();
+          onSelect(item.id);
           bringToFront(item.id);
         }}
         onDblClick={(e) => {
@@ -274,6 +342,8 @@ const MapItemImage: React.FC<{
   );
 };
 
+const MapItemImage = React.memo(MapItemImageComponent, areItemPropsEqual);
+
 interface MapWorkspaceProps {
   mapBase64: string | null;
 }
@@ -307,7 +377,7 @@ const MapWorkspace: React.FC<MapWorkspaceProps> = ({ mapBase64 }) => {
       tokenId: string | null;
   }>({ visible: false, tokenId: null });
 
-  const [image] = useImage(mapBase64 || '', "anonymous");
+  const [image] = useCachedImage(mapBase64 || '', "anonymous");
 
   // Store
   const items = useTokenStore((state) => state.items);
@@ -367,6 +437,14 @@ const MapWorkspace: React.FC<MapWorkspaceProps> = ({ mapBase64 }) => {
     loadItems();
   }, [loadItems]);
 
+  const handleSelect = useCallback((id: string) => {
+    setSelectedId(id);
+  }, []);
+
+  const handleHover = useCallback((id: string | null) => {
+    setHoveredTokenId(id);
+  }, []);
+
   const checkDeselect = (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
     // Deselect if clicked on empty stage or explicitly on background image
     const clickedOnStage = e.target === e.target.getStage();
@@ -374,7 +452,7 @@ const MapWorkspace: React.FC<MapWorkspaceProps> = ({ mapBase64 }) => {
     setContextMenu({ ...contextMenu, visible: false });
   };
 
-  const handleItemContextMenu = (e: Konva.KonvaEventObject<PointerEvent | MouseEvent>, id: string) => {
+  const handleItemContextMenu = useCallback((e: Konva.KonvaEventObject<PointerEvent | MouseEvent>, id: string) => {
     const stage = e.target.getStage();
     if (!stage) return;
     
@@ -390,7 +468,7 @@ const MapWorkspace: React.FC<MapWorkspaceProps> = ({ mapBase64 }) => {
         tokenId: id
       });
     }
-  };
+  }, [contextMenu]);
 
   // Close menu on click outside
   useEffect(() => {
@@ -521,6 +599,7 @@ const MapWorkspace: React.FC<MapWorkspaceProps> = ({ mapBase64 }) => {
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
@@ -796,9 +875,9 @@ const MapWorkspace: React.FC<MapWorkspaceProps> = ({ mapBase64 }) => {
                   key={item.id} 
                   item={item} 
                   isSelected={item.id === selectedId}
-                  onSelect={() => setSelectedId(item.id)}
+                  onSelect={handleSelect}
                   onContextMenu={handleItemContextMenu}
-                  onHover={setHoveredTokenId}
+                  onHover={handleHover}
                 />
               ))}
             </Layer>
